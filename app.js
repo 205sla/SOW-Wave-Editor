@@ -455,8 +455,38 @@ function buildWaveEl(wave, idx) {
   return el;
 }
 
-function buildMonsterEl(m, waveIdx, monsterIdx) {
+function buildMtBtOptions(kind, currentValue) {
   const settings = curSettings();
+  const list = kind === 'mt' ? settings.monsterTypeMap : settings.behaviorTreeMap;
+  const placeholder = kind === 'mt' ? '(없음)' : '(없음 → "None")';
+  const opts = [`<option value="">${placeholder}</option>`]
+    .concat(list.map(r =>
+      `<option value="${escHtml(r.name)}"${r.name === currentValue ? ' selected' : ''}>${escHtml(r.name)}</option>`));
+  let unmapped = '';
+  if (currentValue && !list.find(r => r.name === currentValue)) {
+    unmapped = `<option value="${escHtml(currentValue)}" selected>${escHtml(currentValue)} (미등록)</option>`;
+  }
+  return unmapped + opts.join('');
+}
+
+// Refresh just the mt/bt <select> options inside the wave list, without
+// rebuilding wave cards (preserves input focus while typing in settings).
+function syncWaveSelects(kind) {
+  const s = curStage(); if (!s) return;
+  const selClass = kind === 'mt' ? '.mt-sel' : '.bt-sel';
+  const monsterField = kind === 'mt' ? 'monsterTypeName' : 'behaviorTreeName';
+  document.querySelectorAll('#wave-list ' + selClass).forEach(sel => {
+    const item = sel.closest('.msd-item');
+    const row = sel.closest('.wave');
+    if (!item || !row) return;
+    const waveIdx = parseInt(row.dataset.waveIdx, 10);
+    const monsterIdx = parseInt(item.dataset.monsterIdx, 10);
+    const m = s.waves[waveIdx]?.monsters?.[monsterIdx]; if (!m) return;
+    sel.innerHTML = buildMtBtOptions(kind, m[monsterField]);
+  });
+}
+
+function buildMonsterEl(m, waveIdx, monsterIdx) {
   const el = document.createElement('div');
   el.className = 'msd-item';
   el.dataset.monsterIdx = monsterIdx;
@@ -481,36 +511,15 @@ function buildMonsterEl(m, waveIdx, monsterIdx) {
   el.addEventListener('dragleave', onDragLeave);
   el.addEventListener('dragend', onDragEnd);
 
-  const mtOptions = ['<option value="">(없음)</option>']
-    .concat(settings.monsterTypeMap.map(r =>
-      `<option value="${escHtml(r.name)}"${r.name === m.monsterTypeName ? ' selected' : ''}>${escHtml(r.name)}</option>`));
-  const btOptions = ['<option value="">(없음 → "None")</option>']
-    .concat(settings.behaviorTreeMap.map(r =>
-      `<option value="${escHtml(r.name)}"${r.name === m.behaviorTreeName ? ' selected' : ''}>${escHtml(r.name)}</option>`));
-
-  let mtUnmapped = '';
-  if (m.monsterTypeName && !settings.monsterTypeMap.find(r => r.name === m.monsterTypeName)) {
-    mtUnmapped = `<option value="${escHtml(m.monsterTypeName)}" selected>${escHtml(m.monsterTypeName)} (미등록)</option>`;
-  }
-  let btUnmapped = '';
-  if (m.behaviorTreeName && !settings.behaviorTreeMap.find(r => r.name === m.behaviorTreeName)) {
-    btUnmapped = `<option value="${escHtml(m.behaviorTreeName)}" selected>${escHtml(m.behaviorTreeName)} (미등록)</option>`;
-  }
-
-  const fallbackLabel = (!m.monsterTypeName)
-    ? `<span style="color:#a85;font-size:10px" title="설정에 매핑 없으면 export 시 빈 경로">이름없는 적${monsterIdx + 1}</span>`
-    : '';
-
   el.innerHTML = `
     <div class="msd-row1">
       <span class="handle" title="드래그로 순서 변경">⠿</span>
       <label class="field">MonsterType
-        <select class="mt-sel">${mtUnmapped}${mtOptions.join('')}</select>
+        <select class="mt-sel">${buildMtBtOptions('mt', m.monsterTypeName)}</select>
       </label>
       <label class="field">BehaviorTree
-        <select class="bt-sel">${btUnmapped}${btOptions.join('')}</select>
+        <select class="bt-sel">${buildMtBtOptions('bt', m.behaviorTreeName)}</select>
       </label>
-      ${fallbackLabel}
       <button class="x-btn x" title="삭제">✕</button>
     </div>
     <div class="msd-row2">
@@ -818,7 +827,6 @@ function setMonsterField(waveIdx, monsterIdx, field, value) {
   const m = w.monsters[monsterIdx]; if (!m) return;
   m[field] = value;
   saveDebounced();
-  if (field === 'monsterTypeName') renderEditor();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -859,9 +867,19 @@ function moveMappingRow(kind, from, to) {
 function setMappingField(kind, idx, field, value) {
   const list = mappingList(kind); if (!list) return;
   const row = list[idx]; if (!row) return;
+  const old = row[field];
   row[field] = value;
+  if (field === 'name' && old && old !== value) {
+    // 매핑 이름을 한 글자씩 칠 때 monster select가 (미등록)으로 깜빡이지
+    // 않도록, 같은 테마의 모든 monster 참조도 함께 따라 바꾼다.
+    const t = curTheme();
+    const mField = kind === 'mt' ? 'monsterTypeName' : 'behaviorTreeName';
+    if (t) t.stages.forEach(s => s.waves.forEach(w => w.monsters.forEach(m => {
+      if (m[mField] === old) m[mField] = value;
+    })));
+  }
   saveDebounced();
-  renderEditor();
+  syncWaveSelects(kind);
 }
 
 // ════════════════════════════════════════════════════════════════════

@@ -170,11 +170,6 @@ select { padding: 2px 4px; }
   border-bottom: 1px solid #222;
   flex-shrink: 0;
 }
-#level-name {
-  width: 220px;
-  font-size: 12px;
-  color: #ddd;
-}
 #wave-list {
   flex: 1;
   overflow-y: auto;
@@ -260,7 +255,6 @@ select { padding: 2px 4px; }
 .field input { color: #ccc; }
 .field select { color: #ccc; min-width: 110px; }
 .field.wide input { width: 120px; }
-.field.wider input { width: 160px; }
 
 .msd-item .x-btn { margin-left: auto; }
 
