@@ -1,0 +1,384 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0f0f0f;
+  color: #aaa;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Top toolbar ─────────────────────────────────────────────────── */
+#top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #181818;
+  border-bottom: 1px solid #222;
+  flex-shrink: 0;
+}
+.title {
+  color: #ccc;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.sep { width: 1px; height: 18px; background: #2a2a2a; margin: 0 2px; flex-shrink: 0; }
+.hint { color: #444; font-size: 10px; }
+
+/* ── Buttons / inputs ────────────────────────────────────────────── */
+button {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  color: #888;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+}
+button:hover { background: #252525; color: #bbb; }
+button.act { border-color: #555; color: #ccc; }
+button.danger { color: #a55; }
+button.danger:hover { color: #d77; }
+button.mini { padding: 1px 6px; font-size: 10px; }
+button.x {
+  background: none; border: none; color: #888;
+  font-size: 14px; cursor: pointer; padding: 0 4px;
+}
+button.x:hover { color: #ccc; }
+
+input[type=text], input[type=number], select {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  color: #bbb;
+  padding: 2px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  min-width: 0;
+}
+input[type=number] { width: 56px; }
+input[type=text]:focus, input[type=number]:focus, select:focus {
+  outline: none;
+  border-color: #555;
+  color: #ddd;
+}
+select { padding: 2px 4px; }
+
+/* ── Main layout ─────────────────────────────────────────────────── */
+#main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+#sidebar {
+  width: 220px;
+  background: #131313;
+  border-right: 1px solid #222;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.side-head {
+  padding: 8px 10px;
+  color: #777;
+  font-size: 11px;
+  border-bottom: 1px solid #222;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.theme-area {
+  padding: 6px 8px;
+  border-bottom: 1px solid #222;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.theme-area select {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: #cda;
+  background: #1a1a1a;
+  border: 1px solid #333;
+}
+.theme-area select:focus { outline: none; border-color: #555; }
+.theme-actions {
+  display: flex;
+  gap: 3px;
+}
+.theme-actions button {
+  flex: 1;
+  padding: 2px 0;
+  font-size: 10px;
+}
+#stage-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+.side-foot {
+  padding: 6px;
+  border-top: 1px solid #222;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-foot button { width: 100%; }
+
+.stage-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 2px;
+  margin-bottom: 1px;
+  color: #888;
+  font-size: 11px;
+}
+.stage-row:hover { background: #1c1c1c; }
+.stage-row.cur { background: #1e2a1e; color: #cda; }
+.stage-row .stage-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Editor area ─────────────────────────────────────────────────── */
+#editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#editor-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #141414;
+  border-bottom: 1px solid #222;
+  flex-shrink: 0;
+}
+#level-name {
+  width: 220px;
+  font-size: 12px;
+  color: #ddd;
+}
+#wave-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+.empty {
+  text-align: center;
+  color: #444;
+  padding: 40px 20px;
+  font-size: 11px;
+}
+
+/* ── Wave card ───────────────────────────────────────────────────── */
+.wave {
+  background: #161616;
+  border: 1px solid #262626;
+  margin-bottom: 8px;
+}
+.wave.dragging { opacity: 0.4; }
+.wave.drop-above { border-top: 2px solid #4a8 !important; }
+.wave.drop-below { border-bottom: 2px solid #4a8 !important; }
+
+.wave-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: #1c1c1c;
+  border-bottom: 1px solid #262626;
+}
+.handle {
+  cursor: grab;
+  color: #555;
+  user-select: none;
+  font-size: 14px;
+  padding: 0 2px;
+}
+.handle:hover { color: #aaa; }
+.wave-title {
+  flex: 1;
+  color: #cda;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.wave-body { padding: 8px; }
+
+.msd-section { margin-bottom: 8px; }
+.msd-label {
+  color: #666;
+  font-size: 10px;
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.msd-list { margin-bottom: 4px; }
+
+/* ── MonsterSpawnData entry ──────────────────────────────────────── */
+.msd-item {
+  background: #1a1a1a;
+  border: 1px solid #262626;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+}
+.msd-item.dragging { opacity: 0.4; }
+.msd-item.drop-above { border-top: 2px solid #4a8 !important; }
+.msd-item.drop-below { border-bottom: 2px solid #4a8 !important; }
+
+.msd-row1, .msd-row2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.msd-row1 { margin-bottom: 5px; }
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #666;
+  font-size: 10px;
+}
+.field input { color: #ccc; }
+.field select { color: #ccc; min-width: 110px; }
+.field.wide input { width: 120px; }
+.field.wider input { width: 160px; }
+
+.msd-item .x-btn { margin-left: auto; }
+
+/* ── Wave fields ─────────────────────────────────────────────────── */
+.wave-fields {
+  display: flex;
+  gap: 12px;
+  padding: 6px 8px;
+  background: #131313;
+  border: 1px solid #1f1f1f;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.wave-fields .field input { width: 64px; }
+
+/* ── Status bar ──────────────────────────────────────────────────── */
+#bar {
+  padding: 3px 10px;
+  background: #0c0c0c;
+  border-top: 1px solid #1e1e1e;
+  font-size: 10px;
+  color: #555;
+  flex-shrink: 0;
+}
+#bar.flash { color: #5a5; }
+
+/* ── Modal ───────────────────────────────────────────────────────── */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+.modal.open { display: flex; }
+.modal-box {
+  background: #181818;
+  border: 1px solid #333;
+  width: 480px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal-box.wide { width: 720px; }
+.modal-head {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a2a;
+  color: #ccc;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.modal-head .x { margin-left: auto; }
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+.modal-foot {
+  padding: 8px 12px;
+  border-top: 1px solid #2a2a2a;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.confirm-msg {
+  color: #bbb;
+  line-height: 1.5;
+  padding: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* ── Settings sections ───────────────────────────────────────────── */
+.settings-section { margin-bottom: 18px; }
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cca;
+  font-size: 12px;
+  font-weight: bold;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #262626;
+}
+.section-head button { margin-left: auto; }
+.section-hint {
+  color: #555;
+  font-size: 10px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.section-hint code {
+  background: #1a1a1a;
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: #888;
+  font-size: 10px;
+}
+
+.map-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 1px solid #1c1c1c;
+}
+.map-row.dragging { opacity: 0.4; }
+.map-row.drop-above { border-top: 2px solid #4a8 !important; }
+.map-row.drop-below { border-bottom: 2px solid #4a8 !important; }
+.map-row .map-name { width: 140px; flex-shrink: 0; }
+.map-row .map-path { flex: 1; min-width: 0; }
+.map-row .map-path input { width: 100%; }
