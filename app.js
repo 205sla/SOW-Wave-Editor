@@ -29,7 +29,7 @@ const BT_PREFIX = "/Script/AIModule.BehaviorTree'";
 const PATH_SUFFIX = "'";
 const COMMON_PREFIX = '/Game/01Blueprints/Enemy/'; // auto-prepended on wrap, auto-stripped on unwrap
 const BT_NONE = 'None';
-const SCHEMA_VERSION = 2; // bumped: themes[] container
+const SCHEMA_VERSION = 3; // bumped: per-monster routeName + per-theme routeNames
 
 // ─── State ──────────────────────────────────────────────────────────
 let themes = [];          // [{ id, name, settings, stages: [{ id, name, waves }] }]
@@ -63,7 +63,11 @@ const SEED_FOREST_SETTINGS = {
     { name: 'Default',             path: 'AI/BT_EnemyBase.BT_EnemyBase' },
     { name: 'BT_Enemy_Taurus',     path: 'AI/BT_Enemy_Taurus.BT_Enemy_Taurus' },
     { name: 'BT_Enemy_ForestBoss', path: 'AI/BT_Enemy_ForestBoss.BT_Enemy_ForestBoss' }
-  ]
+  ],
+  // Route preset names — FName values matching rows in the UE EnemyRoutes
+  // DataTable. Empty routeName on a monster → exported as "None" (UE
+  // falls back to default route).
+  routeNames: ['Route1', 'Route2']
 };
 
 // Compact stage seed: each wave is { ms: [...], d, p, r }
@@ -111,7 +115,8 @@ function expandStage(s) {
         spawnTime:         m[2],
         spawnInterval:     m[3],
         spawnPointIndices: [...m[4]],
-        behaviorTreeName:  m[5]
+        behaviorTreeName:  m[5],
+        routeName:         m[6] || ''
       })),
       waveDuration:     w.d,
       preInterludeTime: w.p,
@@ -178,11 +183,16 @@ function loadAll() {
   }
   // Normalize: strip the common prefix from any settings paths that still have it
   themes.forEach(t => {
-    if (!t.settings) t.settings = { monsterTypeMap: [], behaviorTreeMap: [] };
+    if (!t.settings) t.settings = { monsterTypeMap: [], behaviorTreeMap: [], routeNames: [] };
     if (!t.settings.monsterTypeMap) t.settings.monsterTypeMap = [];
     if (!t.settings.behaviorTreeMap) t.settings.behaviorTreeMap = [];
+    if (!Array.isArray(t.settings.routeNames)) t.settings.routeNames = [];
     t.settings.monsterTypeMap.forEach(r => { r.path = shortenInner(r.path || ''); });
     t.settings.behaviorTreeMap.forEach(r => { r.path = shortenInner(r.path || ''); });
+    // Backfill routeName on pre-v3 monsters
+    (t.stages || []).forEach(s => (s.waves || []).forEach(w => (w.monsters || []).forEach(m => {
+      if (typeof m.routeName !== 'string') m.routeName = '';
+    })));
   });
   // Sanity: ensure the cached selections are valid
   if (!themes.find(t => t.id === currentThemeId)) currentThemeId = themes[0]?.id || null;
@@ -422,7 +432,16 @@ function buildWaveEl(wave, idx) {
   msd.className = 'msd-section';
   const lbl = document.createElement('div');
   lbl.className = 'msd-label';
-  lbl.textContent = `MonsterSpawnData (${wave.monsters.length})`;
+  lbl.innerHTML =
+    `<span>MonsterSpawnData (${wave.monsters.length})</span>` +
+    `<select class="bulk-route-sel" title="이 wave의 모든 MonsterSpawnData에 Route 일괄 적용">${buildBulkRouteOptions()}</select>`;
+  const bulkSel = lbl.querySelector('.bulk-route-sel');
+  bulkSel.onchange = e => {
+    const v = e.target.value;
+    e.target.value = '';            // reset to placeholder after applying
+    if (!v) return;
+    applyBulkRoute(idx, v);
+  };
   msd.appendChild(lbl);
 
   const msdList = document.createElement('div');
@@ -455,26 +474,48 @@ function buildWaveEl(wave, idx) {
   return el;
 }
 
-function buildMtBtOptions(kind, currentValue) {
+// Build <option> list for one of the per-monster selects (mt/bt/route).
+// Renders placeholder + preset names + an "unmapped" entry for values that
+// aren't in the preset list, so import/export round-trips don't silently
+// drop unknown values.
+function buildSelectOptions(kind, currentValue) {
   const settings = curSettings();
-  const list = kind === 'mt' ? settings.monsterTypeMap : settings.behaviorTreeMap;
-  const placeholder = kind === 'mt' ? '(없음)' : '(없음 → "None")';
+  let names, placeholder;
+  if (kind === 'mt') {
+    names = settings.monsterTypeMap.map(r => r.name);
+    placeholder = '(없음)';
+  } else if (kind === 'bt') {
+    names = settings.behaviorTreeMap.map(r => r.name);
+    placeholder = '(없음 → "None")';
+  } else { // 'route'
+    names = settings.routeNames || [];
+    placeholder = '(Default / None)';
+  }
   const opts = [`<option value="">${placeholder}</option>`]
-    .concat(list.map(r =>
-      `<option value="${escHtml(r.name)}"${r.name === currentValue ? ' selected' : ''}>${escHtml(r.name)}</option>`));
+    .concat(names.map(n =>
+      `<option value="${escHtml(n)}"${n === currentValue ? ' selected' : ''}>${escHtml(n)}</option>`));
   let unmapped = '';
-  if (currentValue && !list.find(r => r.name === currentValue)) {
+  if (currentValue && !names.includes(currentValue)) {
     unmapped = `<option value="${escHtml(currentValue)}" selected>${escHtml(currentValue)} (미등록)</option>`;
   }
   return unmapped + opts.join('');
+}
+
+// Placeholder-only Route options for the per-wave bulk applier.
+function buildBulkRouteOptions() {
+  const settings = curSettings();
+  const names = settings.routeNames || [];
+  return ['<option value="">(일괄 적용 Route...)</option>']
+    .concat(names.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`))
+    .join('');
 }
 
 // Refresh just the mt/bt <select> options inside the wave list, without
 // rebuilding wave cards (preserves input focus while typing in settings).
 function syncWaveSelects(kind) {
   const s = curStage(); if (!s) return;
-  const selClass = kind === 'mt' ? '.mt-sel' : '.bt-sel';
-  const monsterField = kind === 'mt' ? 'monsterTypeName' : 'behaviorTreeName';
+  const selClass = kind === 'mt' ? '.mt-sel' : kind === 'bt' ? '.bt-sel' : '.route-sel';
+  const monsterField = kind === 'mt' ? 'monsterTypeName' : kind === 'bt' ? 'behaviorTreeName' : 'routeName';
   document.querySelectorAll('#wave-list ' + selClass).forEach(sel => {
     const item = sel.closest('.msd-item');
     const row = sel.closest('.wave');
@@ -482,8 +523,15 @@ function syncWaveSelects(kind) {
     const waveIdx = parseInt(row.dataset.waveIdx, 10);
     const monsterIdx = parseInt(item.dataset.monsterIdx, 10);
     const m = s.waves[waveIdx]?.monsters?.[monsterIdx]; if (!m) return;
-    sel.innerHTML = buildMtBtOptions(kind, m[monsterField]);
+    sel.innerHTML = buildSelectOptions(kind, m[monsterField]);
   });
+  // For route, also refresh the per-wave bulk selectors so newly added or
+  // removed route presets show up there as well.
+  if (kind === 'route') {
+    document.querySelectorAll('#wave-list .bulk-route-sel').forEach(sel => {
+      sel.innerHTML = buildBulkRouteOptions();
+    });
+  }
 }
 
 function buildMonsterEl(m, waveIdx, monsterIdx) {
@@ -515,10 +563,13 @@ function buildMonsterEl(m, waveIdx, monsterIdx) {
     <div class="msd-row1">
       <span class="handle" title="드래그로 순서 변경">⠿</span>
       <label class="field">MonsterType
-        <select class="mt-sel">${buildMtBtOptions('mt', m.monsterTypeName)}</select>
+        <select class="mt-sel">${buildSelectOptions('mt', m.monsterTypeName)}</select>
       </label>
       <label class="field">BehaviorTree
-        <select class="bt-sel">${buildMtBtOptions('bt', m.behaviorTreeName)}</select>
+        <select class="bt-sel">${buildSelectOptions('bt', m.behaviorTreeName)}</select>
+      </label>
+      <label class="field">Route
+        <select class="route-sel">${buildSelectOptions('route', m.routeName)}</select>
       </label>
       <button class="x-btn x" title="삭제">✕</button>
     </div>
@@ -532,6 +583,7 @@ function buildMonsterEl(m, waveIdx, monsterIdx) {
 
   el.querySelector('.mt-sel').onchange = e => setMonsterField(waveIdx, monsterIdx, 'monsterTypeName', e.target.value);
   el.querySelector('.bt-sel').onchange = e => setMonsterField(waveIdx, monsterIdx, 'behaviorTreeName', e.target.value);
+  el.querySelector('.route-sel').onchange = e => setMonsterField(waveIdx, monsterIdx, 'routeName', e.target.value);
   el.querySelector('.cnt').oninput = e => setMonsterField(waveIdx, monsterIdx, 'monsterCount', parseFloat(e.target.value) || 0);
   el.querySelector('.time').oninput = e => setMonsterField(waveIdx, monsterIdx, 'spawnTime', parseFloat(e.target.value) || 0);
   el.querySelector('.int').oninput = e => setMonsterField(waveIdx, monsterIdx, 'spawnInterval', parseFloat(e.target.value) || 0);
@@ -549,10 +601,12 @@ function renderSettings() {
   document.getElementById('settings-theme-name').textContent = t ? t.name : '(없음)';
   const mt = document.getElementById('mt-list');
   const bt = document.getElementById('bt-list');
-  mt.innerHTML = ''; bt.innerHTML = '';
+  const rt = document.getElementById('route-list');
+  mt.innerHTML = ''; bt.innerHTML = ''; rt.innerHTML = '';
   if (!t) return;
   t.settings.monsterTypeMap.forEach((r, i) => mt.appendChild(buildMappingRow(r, 'mt', i)));
   t.settings.behaviorTreeMap.forEach((r, i) => bt.appendChild(buildMappingRow(r, 'bt', i)));
+  (t.settings.routeNames || []).forEach((n, i) => rt.appendChild(buildRouteRow(n, i)));
 }
 
 function buildMappingRow(row, kind, idx) {
@@ -581,6 +635,31 @@ function buildMappingRow(row, kind, idx) {
   return el;
 }
 
+// Simplified row for Route presets — no path, name input takes full width.
+function buildRouteRow(name, idx) {
+  const el = document.createElement('div');
+  el.className = 'map-row route-row';
+  el.draggable = true;
+  el.addEventListener('dragstart', e => {
+    if (!e.target.classList.contains('handle')) { e.preventDefault(); return; }
+    onDragStart(e, 'mapping-route', { from: idx });
+  });
+  el.addEventListener('dragover', onDragOver);
+  el.addEventListener('drop', e => onDrop(e, 'mapping-route', { to: idx }));
+  el.addEventListener('dragleave', onDragLeave);
+  el.addEventListener('dragend', onDragEnd);
+
+  el.innerHTML = `
+    <span class="handle" title="드래그로 순서 변경">⠿</span>
+    <input type="text" class="map-name" value="${escHtml(name)}" placeholder="Route1">
+    <button class="x" title="삭제">✕</button>
+  `;
+  const inp = el.querySelector('input');
+  inp.oninput = () => setMappingField('route', idx, 'name', inp.value);
+  el.querySelector('.x').onclick = () => deleteMappingRow('route', idx);
+  return el;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // Mutations: themes
 // ════════════════════════════════════════════════════════════════════
@@ -588,7 +667,7 @@ function newThemeObj(name) {
   return {
     id: makeId(),
     name: name || 'New_Theme',
-    settings: { monsterTypeMap: [], behaviorTreeMap: [] },
+    settings: { monsterTypeMap: [], behaviorTreeMap: [], routeNames: [] },
     stages: []
   };
 }
@@ -790,7 +869,8 @@ function newMonsterObj() {
     spawnTime: 1,
     spawnInterval: 1,
     spawnPointIndices: [0],
-    behaviorTreeName: ''
+    behaviorTreeName: '',
+    routeName: ''
   };
 }
 
@@ -829,20 +909,34 @@ function setMonsterField(waveIdx, monsterIdx, field, value) {
   saveDebounced();
 }
 
+function applyBulkRoute(waveIdx, routeName) {
+  const s = curStage(); if (!s) return;
+  const w = s.waves[waveIdx]; if (!w) return;
+  if (!w.monsters.length) { setStatus('이 Wave에 MonsterSpawnData가 없습니다'); return; }
+  w.monsters.forEach(m => { m.routeName = routeName; });
+  saveDebounced();
+  syncWaveSelects('route');
+  setStatus(`Wave ${waveIdx + 1}의 ${w.monsters.length}개 MSD에 Route "${routeName}" 적용`);
+}
+
 // ════════════════════════════════════════════════════════════════════
 // Mutations: settings mappings (per-theme)
 // ════════════════════════════════════════════════════════════════════
 function mappingList(kind) {
   const t = curTheme(); if (!t) return null;
-  return kind === 'mt' ? t.settings.monsterTypeMap : t.settings.behaviorTreeMap;
+  if (kind === 'mt') return t.settings.monsterTypeMap;
+  if (kind === 'bt') return t.settings.behaviorTreeMap;
+  if (kind === 'route') return t.settings.routeNames;
+  return null;
 }
 
+// kind: 'mt' | 'bt' use {name, path}; 'route' uses bare strings.
 function addMappingRow(kind) {
   const list = mappingList(kind); if (!list) return;
-  list.push({ name: '', path: '' });
+  list.push(kind === 'route' ? '' : { name: '', path: '' });
   saveDebounced();
   renderSettings();
-  renderEditor();
+  syncWaveSelects(kind);
 }
 
 function deleteMappingRow(kind, idx) {
@@ -850,7 +944,7 @@ function deleteMappingRow(kind, idx) {
   list.splice(idx, 1);
   saveDebounced();
   renderSettings();
-  renderEditor();
+  syncWaveSelects(kind);
 }
 
 function moveMappingRow(kind, from, to) {
@@ -861,11 +955,26 @@ function moveMappingRow(kind, from, to) {
   list.splice(to, 0, r);
   saveDebounced();
   renderSettings();
-  renderEditor();
+  syncWaveSelects(kind);
 }
 
 function setMappingField(kind, idx, field, value) {
   const list = mappingList(kind); if (!list) return;
+  if (kind === 'route') {
+    // Route 목록은 string 배열 — field 인자를 무시하고 value 자체를 저장.
+    const old = list[idx];
+    if (old === value) return;
+    list[idx] = value;
+    if (old && old !== value) {
+      const t = curTheme();
+      if (t) t.stages.forEach(s => s.waves.forEach(w => w.monsters.forEach(m => {
+        if (m.routeName === old) m.routeName = value;
+      })));
+    }
+    saveDebounced();
+    syncWaveSelects('route');
+    return;
+  }
   const row = list[idx]; if (!row) return;
   const old = row[field];
   row[field] = value;
@@ -921,8 +1030,9 @@ function onDrop(e, kind, payload) {
     moveWave(from, to);
   } else if (kind === 'monster') {
     if (dragState.waveIdx === payload.waveIdx) moveMonster(payload.waveIdx, from, to);
-  } else if (kind === 'mapping-mt' || kind === 'mapping-bt') {
-    moveMappingRow(kind === 'mapping-mt' ? 'mt' : 'bt', from, to);
+  } else if (kind === 'mapping-mt' || kind === 'mapping-bt' || kind === 'mapping-route') {
+    const k = kind === 'mapping-mt' ? 'mt' : kind === 'mapping-bt' ? 'bt' : 'route';
+    moveMappingRow(k, from, to);
   }
 
   document.querySelectorAll('.drop-above, .drop-below').forEach(el => {
@@ -971,7 +1081,8 @@ function buildStageExport(stage, themeSettings) {
         SpawnTime: m.spawnTime,
         SpawnInterval: m.spawnInterval,
         SpawnPointIndices: Array.isArray(m.spawnPointIndices) ? [...m.spawnPointIndices] : [],
-        BehaviorTree: btField
+        BehaviorTree: btField,
+        Route: m.routeName ? m.routeName : BT_NONE
       };
     }),
     WaveDuration: w.waveDuration,
@@ -1073,13 +1184,26 @@ function parseFWaveStage(filename, raw, ctx) {
           }
         }
       }
+      // Route: FName string. "None" or missing → empty (UE falls back to
+      // its default route). New route names are auto-registered into the
+      // theme's preset list.
+      let routeName = '';
+      const routeRaw = m.Route;
+      if (routeRaw && routeRaw !== BT_NONE) {
+        routeName = String(routeRaw);
+        if (!ctx.routeNameSet.has(routeName)) {
+          ctx.newRoutes.push(routeName);
+          ctx.routeNameSet.add(routeName);
+        }
+      }
       return {
         monsterTypeName: mtName,
         monsterCount: Number(m.MonsterCount) || 0,
         spawnTime: Number(m.SpawnTime) || 0,
         spawnInterval: Number(m.SpawnInterval) || 0,
         spawnPointIndices: Array.isArray(m.SpawnPointIndices) ? m.SpawnPointIndices.slice() : [],
-        behaviorTreeName: btName
+        behaviorTreeName: btName,
+        routeName
       };
     }),
     waveDuration:     Number(w.WaveDuration) || 0,
@@ -1101,11 +1225,12 @@ function importStages(event) {
   }
 
   const ctx = {
-    newMT: [], newBT: [], newStages: [],
+    newMT: [], newBT: [], newRoutes: [], newStages: [],
     mtPathIdx: new Map(t.settings.monsterTypeMap.map(r => [r.path, r.name])),
     btPathIdx: new Map(t.settings.behaviorTreeMap.map(r => [r.path, r.name])),
     mtNameSet: new Set(t.settings.monsterTypeMap.map(r => r.name)),
     btNameSet: new Set(t.settings.behaviorTreeMap.map(r => r.name)),
+    routeNameSet: new Set(t.settings.routeNames || []),
     stageNameSet: new Set(t.stages.map(s => s.name))
   };
   const errors = [];
@@ -1133,26 +1258,29 @@ function importStages(event) {
     }
 
     const summarize = arr => {
-      const names = arr.map(r => r.name);
+      const names = arr.map(r => typeof r === 'string' ? r : r.name);
       const head = names.slice(0, 5).join(', ');
       return arr.length > 5 ? `${head} … (+${arr.length - 5})` : head;
     };
 
     let msg = `[테마: ${t.name}]에 ${ctx.newStages.length}개 스테이지를 추가합니다:\n  ${ctx.newStages.map(s => s.name).join(', ')}`;
-    if (ctx.newMT.length) msg += `\n\n신규 MonsterType 매핑 ${ctx.newMT.length}개:\n  ${summarize(ctx.newMT)}`;
-    if (ctx.newBT.length) msg += `\n\n신규 BehaviorTree 매핑 ${ctx.newBT.length}개:\n  ${summarize(ctx.newBT)}`;
-    if (errors.length) msg += `\n\n실패 ${errors.length}건:\n  ${errors.join('\n  ')}`;
+    if (ctx.newMT.length)     msg += `\n\n신규 MonsterType 매핑 ${ctx.newMT.length}개:\n  ${summarize(ctx.newMT)}`;
+    if (ctx.newBT.length)     msg += `\n\n신규 BehaviorTree 매핑 ${ctx.newBT.length}개:\n  ${summarize(ctx.newBT)}`;
+    if (ctx.newRoutes.length) msg += `\n\n신규 Route ${ctx.newRoutes.length}개:\n  ${summarize(ctx.newRoutes)}`;
+    if (errors.length)        msg += `\n\n실패 ${errors.length}건:\n  ${errors.join('\n  ')}`;
     msg += '\n\n계속하시겠습니까?';
 
     askConfirm(msg, () => {
       t.stages = t.stages.concat(ctx.newStages);
       t.settings.monsterTypeMap = t.settings.monsterTypeMap.concat(ctx.newMT);
       t.settings.behaviorTreeMap = t.settings.behaviorTreeMap.concat(ctx.newBT);
+      t.settings.routeNames = (t.settings.routeNames || []).concat(ctx.newRoutes);
       currentStageId = ctx.newStages[0].id;
       saveAll();
       renderAll();
+      const newAny = ctx.newMT.length || ctx.newBT.length || ctx.newRoutes.length;
       setStatus(`${ctx.newStages.length}개 스테이지 가져옴` +
-        (ctx.newMT.length || ctx.newBT.length ? ` (신규 매핑 MT ${ctx.newMT.length}, BT ${ctx.newBT.length})` : ''));
+        (newAny ? ` (신규 매핑 MT ${ctx.newMT.length}, BT ${ctx.newBT.length}, Route ${ctx.newRoutes.length})` : ''));
     });
   });
 }
@@ -1176,7 +1304,7 @@ function importBackup(event) {
     if (!data) { askConfirm('백업 파일이 비어있습니다.', () => {}); return; }
 
     let normalized = null;
-    if (data.schemaVersion === 2 && Array.isArray(data.themes)) {
+    if ((data.schemaVersion === 2 || data.schemaVersion === 3) && Array.isArray(data.themes)) {
       normalized = data.themes;
     } else if (data.schemaVersion === 1 && Array.isArray(data.levels) && data.settings) {
       // legacy: wrap into a single Forest theme
@@ -1191,7 +1319,7 @@ function importBackup(event) {
         }))
       }];
     } else {
-      askConfirm('백업 파일 형식이 잘못되었습니다 (schemaVersion 1 또는 2 필요).', () => {});
+      askConfirm('백업 파일 형식이 잘못되었습니다 (schemaVersion 1 / 2 / 3 필요).', () => {});
       return;
     }
     if (data.schemaVersion > SCHEMA_VERSION) {
@@ -1215,7 +1343,11 @@ function importBackup(event) {
             behaviorTreeMap: (t.settings?.behaviorTreeMap || []).map(r => ({
               name: r.name || '',
               path: unwrapBT(r.path || '')
-            }))
+            })),
+            // schemaVersion 1/2 백업에는 routeNames가 없으므로 빈 배열로 보정.
+            routeNames: Array.isArray(t.settings?.routeNames)
+              ? t.settings.routeNames.map(n => String(n || ''))
+              : []
           },
           stages: (t.stages || []).map(s => ({
             id: s.id || makeId(),
@@ -1227,7 +1359,8 @@ function importBackup(event) {
                 spawnTime: m.spawnTime ?? 0,
                 spawnInterval: m.spawnInterval ?? 0,
                 spawnPointIndices: Array.isArray(m.spawnPointIndices) ? [...m.spawnPointIndices] : [],
-                behaviorTreeName: m.behaviorTreeName ?? ''
+                behaviorTreeName: m.behaviorTreeName ?? '',
+                routeName: m.routeName ?? ''
               })),
               waveDuration: w.waveDuration ?? 0,
               preInterludeTime: w.preInterludeTime ?? 0,

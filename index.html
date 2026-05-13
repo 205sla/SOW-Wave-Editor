@@ -81,6 +81,14 @@
         <div class="section-hint">BT 경로도 <code>/Game/01Blueprints/Enemy/</code> 하위만 입력 — export 시 공통 prefix와 <code>/Script/AIModule.BehaviorTree'…'</code>가 자동으로 붙습니다. BT 미선택은 export에 <code>"None"</code>으로 출력됩니다.</div>
         <div id="bt-list"></div>
       </div>
+      <div class="settings-section">
+        <div class="section-head">
+          Route 목록
+          <button onclick="addMappingRow('route')" class="mini">+ 행 추가</button>
+        </div>
+        <div class="section-hint">UE <code>EnemyRoutes</code> DataTable의 행 이름 (FName). 각 MonsterSpawnData가 사용할 이동 경로 식별자. 빈 Route는 export 시 <code>"None"</code>이 되어 UE에서 기본 route fallback이 사용됩니다.</div>
+        <div id="route-list"></div>
+      </div>
     </div>
     <div class="modal-foot">
       <button onclick="closeSettingsModal()">닫기</button>
