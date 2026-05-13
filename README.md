@@ -2,11 +2,13 @@
 
 타워 디펜스 게임 SOW(XSBD2)의 언리얼 DataTable 웨이브 데이터를 시각적으로 편집하고 JSON으로 내보내는 단일 페이지 도구. GitHub Pages에 그대로 호스팅 가능한 정적 파일 묶음.
 
+**라이브**: <https://sow-wave-editor.205.kr/>
+
 [SOW Grid Editor](../SOW-Grid-Editor)의 자매 프로젝트이며 동일한 톤·스택·UX를 따른다.
 
 ## 빠른 시작
 
-1. 브라우저에서 `index.html`을 연다 (또는 GitHub Pages URL).
+1. <https://sow-wave-editor.205.kr/> 접속, 또는 로컬에서 `index.html`을 연다.
 2. 첫 실행 시 `Forest` 테마 + `Forest_Stage1/2/3` 시드와 매핑이 자동 로드된다.
 3. 좌측 상단 드롭다운에서 테마를 선택, 그 아래 목록에서 스테이지를 선택.
 4. 우측에서 Wave / MonsterSpawnData를 편집.
