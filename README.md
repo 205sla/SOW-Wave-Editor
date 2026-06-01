@@ -32,7 +32,7 @@ themes[]                  ← 테마 (Forest, Iceland, …)
 - **스테이지 관리**: 좌측 목록에서 선택. 추가/복제/삭제/이름 변경. 스테이지 이름이 export 파일명이 됨.
 - **Wave 편집**: Wave 추가/삽입/복제/삭제, 드래그앤드롭으로 순서 재배치. `WaveNum`/`Name`은 배열 인덱스에서 자동 도출.
 - **MonsterSpawnData 편집**: Wave 안에서 그룹 추가/삭제/순서변경. `MonsterType`/`BehaviorTree`/`Route`는 현재 테마의 Settings에 등록된 항목만 드롭다운에 노출. 각 Wave 헤더에는 그 wave의 모든 MSD에 Route를 한 번에 적용하는 일괄 selector도 제공 (적용 후 placeholder로 리셋, 이후 개별 수정 가능).
-- **Settings (테마별)**: MonsterType / BehaviorTree 매핑 + Route 목록 편집. 매핑의 표시 이름은 UI 식별자, 내부 경로는 export 시 자동 래핑됨. Route는 단순 FName 문자열 (UE `EnemyRoutes` DataTable의 row 이름과 대응).
+- **Settings (테마별)**: MonsterType / BehaviorTree 매핑 + Route 목록 편집. 매핑의 표시 이름은 UI 식별자, 내부 경로는 export 시 자동 래핑됨. Route는 단순 FName 문자열이며 UE에서 스폰 위치와 이동 경로를 함께 결정한다.
 - **자동 저장**: 편집 시마다 500ms 디바운스로 localStorage에 영속화.
 - **Export**:
   - 스테이지별 JSON (UE F_Wave 포맷 1:1)
@@ -68,9 +68,8 @@ SOW-Wave-Editor/
       "MonsterCount": 30,
       "SpawnTime": 1,
       "SpawnInterval": 1,
-      "SpawnPointIndices": [0],
       "BehaviorTree": "None",     // 또는 "/Script/AIModule.BehaviorTree'<inner_path>'"
-      "Route": "None"             // 또는 "Route1" — UE EnemyRoutes DataTable row 이름 (FName)
+      "Route": "None"             // 또는 "Route1", "Route2_M" — 스폰 위치 + 이동 경로를 결정하는 FName
     }
   ],
   "WaveDuration": 0,
@@ -109,14 +108,15 @@ Export 시 도구가 자동으로 공통 prefix와 엔진 래퍼를 씌운다:
 - MonsterType 미선택 → 드롭다운에 `(없음)`으로 표시. Export는 빈 경로로 진행되며 콘솔 경고만 출력.
 - 매핑 안 된 표시 이름 → 드롭다운에 `(미등록)`으로 표시. Export는 빈 경로 + 콘솔 경고.
 - Route 미선택 → 드롭다운에 `(Default / None)`으로 표시. Export는 `"Route": "None"`이 되어 UE 기본 route fallback이 사용됨.
-- 음수, 0, 빈 배열 등 모든 숫자/배열 입력 허용.
+- 기존 JSON/백업에 남아 있는 `SpawnPointIndices`는 import 시 무시됨. 새 export에는 포함되지 않음.
+- 음수, 0 등 숫자 입력 허용.
 - 빨간 줄·차단 모달 같은 방해 요소 없음.
 
-## 백업 포맷 (schemaVersion 3)
+## 백업 포맷 (schemaVersion 4)
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "exportedAt": "2026-05-07T...",
   "themes": [
     {
@@ -125,7 +125,7 @@ Export 시 도구가 자동으로 공통 prefix와 엔진 래퍼를 씌운다:
       "settings": {
         "monsterTypeMap": [{ "name": "BabyYeti", "path": "EnemyTypes/.../BP_Enemy_BabyYeti.BP_Enemy_BabyYeti_C" }],
         "behaviorTreeMap": [{ "name": "Default", "path": "AI/BT_EnemyBase.BT_EnemyBase" }],
-        "routeNames": ["Route1", "Route2"]
+        "routeNames": ["Route1", "Route1_M", "Route2", "Route2_M"]
       },
       "stages": [
         { "id": "...", "name": "Forest_Stage1", "waves": [ ... ] }
@@ -137,6 +137,7 @@ Export 시 도구가 자동으로 공통 prefix와 엔진 래퍼를 씌운다:
 
 - **schemaVersion 1**(레거시: 단일 `settings` + 평면 `levels`) → 자동으로 단일 `Forest` 테마로 래핑.
 - **schemaVersion 2**(테마 컨테이너, Route 이전) → `routeNames`는 빈 배열로, 각 monster의 `routeName`은 빈 문자열로 보정 후 들어옴.
+- **schemaVersion 3**(Route + SpawnPointIndices 공존) → `SpawnPointIndices`는 버리고 Route만 유지.
 
 ## 기술 세부사항
 
@@ -152,5 +153,5 @@ ES6 / CSS Flexbox / localStorage / HTML5 DnD를 지원하는 모든 모던 브�
 
 ---
 
-**버전**: 1.2
+**버전**: 1.3
 **언어**: 한국어 UI (기술 용어 영어 유지)

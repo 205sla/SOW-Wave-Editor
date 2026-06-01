@@ -29,7 +29,7 @@ const BT_PREFIX = "/Script/AIModule.BehaviorTree'";
 const PATH_SUFFIX = "'";
 const COMMON_PREFIX = '/Game/01Blueprints/Enemy/'; // auto-prepended on wrap, auto-stripped on unwrap
 const BT_NONE = 'None';
-const SCHEMA_VERSION = 3; // bumped: per-monster routeName + per-theme routeNames
+const SCHEMA_VERSION = 4; // routeName decides both spawn location and path; SpawnPointIndices removed
 
 // ─── State ──────────────────────────────────────────────────────────
 let themes = [];          // [{ id, name, settings, stages: [{ id, name, waves }] }]
@@ -67,11 +67,13 @@ const SEED_FOREST_SETTINGS = {
   // Route preset names — FName values matching rows in the UE EnemyRoutes
   // DataTable. Empty routeName on a monster → exported as "None" (UE
   // falls back to default route).
-  routeNames: ['Route1', 'Route2']
+  routeNames: ['Route1', 'Route1_M', 'Route2', 'Route2_M']
 };
 
-// Compact stage seed: each wave is { ms: [...], d, p, r }
-// Each monster is [mtName, count, time, interval, [points], btName]
+// Compact stage seed: each wave is { ms: [...], d, p, r }.
+// Each monster keeps the old compact slot for point indices at m[4], but
+// route-based spawn ignores it. New exports do not write SpawnPointIndices.
+// Format: [mtName, count, time, interval, legacyPoints, btName, routeName]
 // (btName '' means "None")
 const SEED_FOREST_STAGES = [
   { name: 'Forest_Stage1', waves: [
@@ -114,7 +116,6 @@ function expandStage(s) {
         monsterCount:      m[1],
         spawnTime:         m[2],
         spawnInterval:     m[3],
-        spawnPointIndices: [...m[4]],
         behaviorTreeName:  m[5],
         routeName:         m[6] || ''
       })),
@@ -189,9 +190,10 @@ function loadAll() {
     if (!Array.isArray(t.settings.routeNames)) t.settings.routeNames = [];
     t.settings.monsterTypeMap.forEach(r => { r.path = shortenInner(r.path || ''); });
     t.settings.behaviorTreeMap.forEach(r => { r.path = shortenInner(r.path || ''); });
-    // Backfill routeName on pre-v3 monsters
+    // Backfill routeName on pre-v3 monsters and strip legacy spawn-point data.
     (t.stages || []).forEach(s => (s.waves || []).forEach(w => (w.monsters || []).forEach(m => {
       if (typeof m.routeName !== 'string') m.routeName = '';
+      delete m.spawnPointIndices;
     })));
   });
   // Sanity: ensure the cached selections are valid
@@ -293,12 +295,6 @@ function unwrapBT(full) {
     inner = inner.slice(BT_PREFIX.length, -PATH_SUFFIX.length);
   return shortenInner(inner);
 }
-
-function parseIndices(s) {
-  if (!s || !s.trim()) return [];
-  return s.split(',').map(p => parseInt(p.trim(), 10)).filter(n => !isNaN(n));
-}
-function formatIndices(arr) { return Array.isArray(arr) ? arr.join(', ') : ''; }
 
 function uniqueName(base, taken) {
   if (!taken.has(base)) return base;
@@ -577,7 +573,6 @@ function buildMonsterEl(m, waveIdx, monsterIdx) {
       <label class="field">MonsterCount <input type="number" step="any" class="cnt" value="${m.monsterCount}"></label>
       <label class="field">SpawnTime <input type="number" step="any" class="time" value="${m.spawnTime}"></label>
       <label class="field">SpawnInterval <input type="number" step="any" class="int" value="${m.spawnInterval}"></label>
-      <label class="field wide">SpawnPointIndices <input type="text" class="pts" value="${escHtml(formatIndices(m.spawnPointIndices))}" placeholder="0, 1, 2"></label>
     </div>
   `;
 
@@ -587,7 +582,6 @@ function buildMonsterEl(m, waveIdx, monsterIdx) {
   el.querySelector('.cnt').oninput = e => setMonsterField(waveIdx, monsterIdx, 'monsterCount', parseFloat(e.target.value) || 0);
   el.querySelector('.time').oninput = e => setMonsterField(waveIdx, monsterIdx, 'spawnTime', parseFloat(e.target.value) || 0);
   el.querySelector('.int').oninput = e => setMonsterField(waveIdx, monsterIdx, 'spawnInterval', parseFloat(e.target.value) || 0);
-  el.querySelector('.pts').oninput = e => setMonsterField(waveIdx, monsterIdx, 'spawnPointIndices', parseIndices(e.target.value));
   el.querySelector('.x-btn').onclick = () => deleteMonster(waveIdx, monsterIdx);
 
   return el;
@@ -868,7 +862,6 @@ function newMonsterObj() {
     monsterCount: 1,
     spawnTime: 1,
     spawnInterval: 1,
-    spawnPointIndices: [0],
     behaviorTreeName: '',
     routeName: ''
   };
@@ -1080,7 +1073,6 @@ function buildStageExport(stage, themeSettings) {
         MonsterCount: m.monsterCount,
         SpawnTime: m.spawnTime,
         SpawnInterval: m.spawnInterval,
-        SpawnPointIndices: Array.isArray(m.spawnPointIndices) ? [...m.spawnPointIndices] : [],
         BehaviorTree: btField,
         Route: m.routeName ? m.routeName : BT_NONE
       };
@@ -1196,12 +1188,14 @@ function parseFWaveStage(filename, raw, ctx) {
           ctx.routeNameSet.add(routeName);
         }
       }
+      if (Array.isArray(m.SpawnPointIndices) && m.SpawnPointIndices.length) {
+        ctx.ignoredSpawnPointIndices++;
+      }
       return {
         monsterTypeName: mtName,
         monsterCount: Number(m.MonsterCount) || 0,
         spawnTime: Number(m.SpawnTime) || 0,
         spawnInterval: Number(m.SpawnInterval) || 0,
-        spawnPointIndices: Array.isArray(m.SpawnPointIndices) ? m.SpawnPointIndices.slice() : [],
         behaviorTreeName: btName,
         routeName
       };
@@ -1226,6 +1220,7 @@ function importStages(event) {
 
   const ctx = {
     newMT: [], newBT: [], newRoutes: [], newStages: [],
+    ignoredSpawnPointIndices: 0,
     mtPathIdx: new Map(t.settings.monsterTypeMap.map(r => [r.path, r.name])),
     btPathIdx: new Map(t.settings.behaviorTreeMap.map(r => [r.path, r.name])),
     mtNameSet: new Set(t.settings.monsterTypeMap.map(r => r.name)),
@@ -1267,6 +1262,9 @@ function importStages(event) {
     if (ctx.newMT.length)     msg += `\n\n신규 MonsterType 매핑 ${ctx.newMT.length}개:\n  ${summarize(ctx.newMT)}`;
     if (ctx.newBT.length)     msg += `\n\n신규 BehaviorTree 매핑 ${ctx.newBT.length}개:\n  ${summarize(ctx.newBT)}`;
     if (ctx.newRoutes.length) msg += `\n\n신규 Route ${ctx.newRoutes.length}개:\n  ${summarize(ctx.newRoutes)}`;
+    if (ctx.ignoredSpawnPointIndices) {
+      msg += `\n\n${ctx.ignoredSpawnPointIndices}개 MonsterSpawnData의 SpawnPointIndices는 Route 기반 스폰 전환에 따라 무시됩니다.`;
+    }
     if (errors.length)        msg += `\n\n실패 ${errors.length}건:\n  ${errors.join('\n  ')}`;
     msg += '\n\n계속하시겠습니까?';
 
@@ -1304,7 +1302,7 @@ function importBackup(event) {
     if (!data) { askConfirm('백업 파일이 비어있습니다.', () => {}); return; }
 
     let normalized = null;
-    if ((data.schemaVersion === 2 || data.schemaVersion === 3) && Array.isArray(data.themes)) {
+    if ((data.schemaVersion === 2 || data.schemaVersion === 3 || data.schemaVersion === 4) && Array.isArray(data.themes)) {
       normalized = data.themes;
     } else if (data.schemaVersion === 1 && Array.isArray(data.levels) && data.settings) {
       // legacy: wrap into a single Forest theme
@@ -1319,7 +1317,7 @@ function importBackup(event) {
         }))
       }];
     } else {
-      askConfirm('백업 파일 형식이 잘못되었습니다 (schemaVersion 1 / 2 / 3 필요).', () => {});
+      askConfirm('백업 파일 형식이 잘못되었습니다 (schemaVersion 1 / 2 / 3 / 4 필요).', () => {});
       return;
     }
     if (data.schemaVersion > SCHEMA_VERSION) {
@@ -1358,7 +1356,6 @@ function importBackup(event) {
                 monsterCount: m.monsterCount ?? 0,
                 spawnTime: m.spawnTime ?? 0,
                 spawnInterval: m.spawnInterval ?? 0,
-                spawnPointIndices: Array.isArray(m.spawnPointIndices) ? [...m.spawnPointIndices] : [],
                 behaviorTreeName: m.behaviorTreeName ?? '',
                 routeName: m.routeName ?? ''
               })),
